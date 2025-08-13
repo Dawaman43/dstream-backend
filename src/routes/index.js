@@ -19,7 +19,7 @@ router.get("/movies/:tmdbId", MovieController.getMovieDetails);
 router.get("/stream", MovieController.stream);
 
 // Protected routes
-router.use();
+router.use(authMiddleware);
 router.post("/watchlist", UserController.addToWatchlist);
 router.post("/download", UserController.startDownload);
 
