@@ -16,7 +16,11 @@ const app = express();
 connectDB(); // ✅ Call the default export directly
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: "*", // allow all origins (for testing)
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+}));
 app.use(helmet());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
