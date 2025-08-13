@@ -1,4 +1,4 @@
-`import User from "../models/user.js";
+import User from "../models/user.js";
 import TorrentService from "../services/torrent.service.js";
 
 // Add movie to watchlist
@@ -51,4 +51,3 @@ export const startDownload = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
-`;
