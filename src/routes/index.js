@@ -1,27 +1,46 @@
 import express from "express";
-import authMiddleware from "../middleware/auth.js";
-
-import * as AuthController from "../controllers/auth.controller.js";
 import * as UserController from "../controllers/user.controller.js";
-import * as MovieController from "../controllers/movie.controller.js";
+import {
+  searchMedia,
+  getMediaDetails,
+  getPopular,
+  getTopRated,
+  getUpcoming,
+  stream,
+} from "../controllers/media.controller.js";
 
 const router = express.Router();
 
-// Auth routes
-router.post("/auth/register", AuthController.register);
-router.post("/auth/login", AuthController.login);
-router.post("/auth/refresh", AuthController.refreshToken);
-
 // Movie routes
-router.get("/movies/popular", MovieController.popular);
-router.get("/movies/search", MovieController.search);
-router.get("/movies/:tmdbId", MovieController.getMovieDetails);
-router.get("/stream", MovieController.stream);
+router.get("/movies/search", searchMedia("movie"));
+router.get("/movies/:tmdbId", getMediaDetails("movie"));
+router.get("/movies/popular", getPopular("movie"));
+router.get("/movies/top-rated", getTopRated("movie"));
+router.get("/movies/upcoming", getUpcoming("movie"));
 
-// Protected routes
-router.use(authMiddleware);
+// Series routes
+router.get("/series/search", searchMedia("tv"));
+router.get("/series/:tmdbId", getMediaDetails("tv"));
+router.get("/series/popular", getPopular("tv"));
+router.get("/series/top-rated", getTopRated("tv"));
+router.get("/series/upcoming", getUpcoming("tv"));
+
+// Anime routes
+router.get("/anime/search", searchMedia("anime"));
+router.get("/anime/:tmdbId", getMediaDetails("anime"));
+router.get("/anime/popular", getPopular("anime"));
+router.get("/anime/top-rated", getTopRated("anime"));
+
+// Stream route (all types)
+router.get("/stream", stream);
+
+// User routes (session-based, no auth)
 router.post("/watchlist", UserController.addToWatchlist);
+router.get("/watchlist", UserController.getWatchlist);
 router.post("/download", UserController.startDownload);
+router.get("/downloads", UserController.getDownloadList);
 
+router.get("/movies/genres/:genreId", getByGenre("movie"));
+router.get("/series/genres/:genreId", getByGenre("tv"));
+router.get("/anime/genres/:genreId", getByGenre("anime"));
 export default router;
-authMiddleware;

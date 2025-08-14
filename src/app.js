@@ -4,16 +4,14 @@ import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import morgan from "morgan";
-
-// Import your db connection function
+import session from "express-session"; // NEW: Add session
 import connectDB from "./config/db.js";
-
 import router from "./routes/index.js";
 
 const app = express();
 
 // Connect to MongoDB
-connectDB(); // ✅ Call the default export directly
+connectDB();
 
 // Middleware
 app.use(cors());
@@ -21,6 +19,16 @@ app.use(helmet());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan("dev"));
+
+// NEW: Session middleware for anonymous user tracking
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || "your-secret-key",
+    resave: false,
+    saveUninitialized: true,
+    cookie: { secure: process.env.NODE_ENV === "production" },
+  })
+);
 
 // Rate limiting
 const limiter = rateLimit({
@@ -32,7 +40,7 @@ app.use(limiter);
 // Routes
 app.use("/api", router);
 
-// Error handling middleware (optional)
+// Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({ error: err.message });
