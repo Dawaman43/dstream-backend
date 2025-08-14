@@ -1,4 +1,5 @@
 import express from "express";
+import downloadController from "../controllers/download.controller.js";
 import {
   searchMedia,
   getMediaDetails,
@@ -11,40 +12,44 @@ import {
 
 const router = express.Router();
 
-// Health check
-router.get("/health", (req, res) => {
-  res.json({ status: "healthy", timestamp: new Date() });
-});
+// -----------------------
+// Health Check
+// -----------------------
+router.get("/health", (req, res) =>
+  res.json({ status: "healthy", timestamp: new Date() })
+);
 
-// Stream endpoint
+// -----------------------
+// Download Routes
+// -----------------------
+router.post("/download", downloadController.startDownload);
+router.get("/downloads", downloadController.getDownloadList);
+
+// -----------------------
+// Streaming Routes
+// -----------------------
 router.get("/stream", stream);
 
-// Media Type Routes
-const setupMediaRoutes = () => {
-  const types = [
-    { path: "movies", type: "movie" },
-    { path: "series", type: "tv" },
-    { path: "anime", type: "anime" },
-  ];
+// -----------------------
+// Dynamic Media Routes
+// -----------------------
+const mediaTypes = [
+  { path: "movies", type: "movie" },
+  { path: "series", type: "tv" },
+  { path: "anime", type: "anime" },
+];
 
-  types.forEach(({ path, type }) => {
-    // Search
-    router.get(`/${path}/search`, searchMedia(type));
+mediaTypes.forEach(({ path, type }) => {
+  router.get(`/${path}/search`, searchMedia(type));
+  router.get(`/${path}/popular`, getPopular(type));
+  router.get(`/${path}/top-rated`, getTopRated(type));
 
-    // Popular, Top Rated, Upcoming
-    router.get(`/${path}/popular`, getPopular(type));
-    router.get(`/${path}/top-rated`, getTopRated(type));
-    if (type !== "anime") router.get(`/${path}/upcoming`, getUpcoming(type));
+  if (type !== "anime") {
+    router.get(`/${path}/upcoming`, getUpcoming(type));
+  }
 
-    // By Genre
-    router.get(`/${path}/genres/:genreId`, getByGenre(type));
-
-    // TMDB Details (must be LAST, after specific routes!)
-    router.get(`/${path}/:tmdbId`, getMediaDetails(type));
-  });
-};
-
-// Setup all media routes
-setupMediaRoutes();
+  router.get(`/${path}/genres/:genreId`, getByGenre(type));
+  router.get(`/${path}/:tmdbId`, getMediaDetails(type));
+});
 
 export default router;

@@ -164,12 +164,24 @@ export const getMediaDetails = (type) => async (req, res) => {
 // Stream (stub)
 export const stream = async (req, res) => {
   try {
-    const { magnet } = req.query;
-    if (!magnet)
-      return res.status(400).json({ error: "Magnet link is required" });
+    const { tmdbId, type } = req.query;
+    if (!tmdbId) return res.status(400).json({ error: "TMDB ID required" });
 
-    // Placeholder, replace with your TorrentService
-    res.json({ message: "Streaming not implemented", magnet });
+    const media = await Media.findOne({ tmdbId, type });
+    if (!media?.torrents?.length)
+      return res.status(404).json({ error: "Media not found" });
+
+    // Get the best quality torrent (simplified)
+    const torrent = media.torrents.reduce((prev, current) =>
+      prev.seeds > current.seeds ? prev : current
+    );
+
+    // Return the magnet URI for client to handle
+    res.json({
+      magnet: torrent.magnet,
+      infoHash: torrent.infoHash,
+      quality: torrent.quality,
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
