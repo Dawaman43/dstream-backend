@@ -1,299 +1,176 @@
-import Media from "../models/media.js";
-import TorrentService from "../services/torrent.service.js";
-import axios from "axios";
+import fetch from "node-fetch";
 
-const TMDB_API_KEY = process.env.TMDB_API_KEY;
+// TMDB base
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
+const API_KEY = process.env.TMDB_API_KEY;
 
-const tmdbEndpoints = {
-  movie: {
-    search: "/search/movie",
-    details: "/movie",
-    popular: "/movie/popular",
-    top_rated: "/movie/top_rated",
-    upcoming: "/movie/upcoming",
-  },
-  tv: {
-    search: "/search/tv",
-    details: "/tv",
-    popular: "/tv/popular",
-    top_rated: "/tv/top_rated",
-    upcoming: "/tv/on_the_air",
-  },
-  anime: {
-    search: "/search/tv",
-    details: "/tv",
-    popular: "/discover/tv",
-    top_rated: "/tv/top_rated",
-  }, // Anime via genre 16
+// Helper to fetch from TMDB
+const tmdbFetch = async (endpoint, params = {}) => {
+  const url = new URL(`${TMDB_BASE_URL}${endpoint}`);
+  url.searchParams.append("api_key", API_KEY);
+  url.searchParams.append("language", "en-US");
+  Object.keys(params).forEach((key) =>
+    url.searchParams.append(key, params[key])
+  );
+
+  const response = await fetch(url.toString());
+  const data = await response.json();
+  return data;
 };
 
-// Shared search function
+// Helper to parse ID
+const parseId = (id) => {
+  const num = Number(id);
+  return isNaN(num) ? null : num;
+};
+
+// Search Media
 export const searchMedia = (type) => async (req, res) => {
   try {
-    const { query } = req.query;
-    if (!query) return res.status(400).json({ error: "Query is required" });
+    const { query, page = 1 } = req.query;
+    if (!query || query.length < 2)
+      return res
+        .status(400)
+        .json({ error: "Query must be at least 2 characters" });
 
-    // Check DB first
-    let dbResults = await Media.find({ $text: { $search: query }, type })
-      .sort({ score: { $meta: "textScore" } })
-      .limit(20);
-
-    if (dbResults.length > 0) return res.json(dbResults);
-
-    // Fallback to TMDB
-    const params = { api_key: TMDB_API_KEY, language: "en-US", query };
-    if (type === "anime") params["with_genres"] = 16; // Animation genre
-    const tmdbRes = await axios.get(
-      `${TMDB_BASE_URL}${tmdbEndpoints[type].search}`,
-      { params }
-    );
-    const tmdbMedia = tmdbRes.data.results;
-
-    // Search torrents
-    const torrents = await TorrentService.searchMedia(
-      query,
-      type === "tv" ? "TV" : type === "anime" ? "Anime" : "Movies"
-    );
-
-    // Merge results
-    const merged = tmdbMedia.map((item) => ({
-      tmdbId: item.id,
-      title: item.title || item.name,
-      overview: item.overview,
-      poster: item.poster_path,
-      backdrop: item.backdrop_path,
-      release_date: item.release_date || item.first_air_date,
-      type,
-      torrents: torrents.filter((t) =>
-        t.title
-          .toLowerCase()
-          .includes(item.title?.toLowerCase() || item.name.toLowerCase())
-      ),
-    }));
-
-    res.json(merged);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// Shared details function
-export const getMediaDetails = (type) => async (req, res) => {
-  try {
-    const { tmdbId } = req.params;
-    let media = await Media.findOne({ tmdbId, type });
-
-    if (!media) {
-      const tmdbRes = await axios.get(
-        `${TMDB_BASE_URL}${tmdbEndpoints[type].details}/${tmdbId}`,
-        {
-          params: { api_key: TMDB_API_KEY, language: "en-US" },
-        }
+    let data;
+    if (type === "anime") {
+      // Use TV search and filter by Animation genre
+      data = await tmdbFetch("/search/tv", { query, page });
+      const results = (data.results || []).filter((item) =>
+        item.genre_ids?.includes(16)
       );
-      const tmdbMedia = tmdbRes.data;
-      const torrents = await TorrentService.searchMedia(
-        tmdbMedia.title || tmdbMedia.name,
-        type === "tv" ? "TV" : type === "anime" ? "Anime" : "Movies"
-      );
-
-      media = {
-        tmdbId: tmdbMedia.id,
-        title: tmdbMedia.title || tmdbMedia.name,
-        overview: tmdbMedia.overview,
-        poster: tmdbMedia.poster_path,
-        backdrop: tmdbMedia.backdrop_path,
-        release_date: tmdbMedia.release_date || tmdbMedia.first_air_date,
-        type,
-        genres: tmdbMedia.genres.map((g) => g.name),
-        runtime: tmdbMedia.runtime || tmdbMedia.episode_run_time?.[0],
-        seasons: tmdbMedia.number_of_seasons,
-        episodes: tmdbMedia.seasons?.flatMap((s) =>
-          s.episodes?.map((e) => ({
-            season: s.season_number,
-            episode: e.episode_number,
-            title: e.name,
-            overview: e.overview,
-            still: e.still_path,
-          }))
-        ),
-        torrents,
-      };
-      // Optionally save to DB
-      await new Media(media).save();
+      return res.json(results);
+    } else {
+      const endpoint = type === "movie" ? "/search/movie" : "/search/tv";
+      data = await tmdbFetch(endpoint, { query, page });
+      return res.json(data.results || []);
     }
-
-    res.json(media);
   } catch (error) {
-    console.error(error);
+    console.error(`[${type}] Search Error:`, error);
     res.status(500).json({ error: error.message });
   }
 };
 
-// Shared popular, top-rated, upcoming
+// Get Popular
 export const getPopular = (type) => async (req, res) => {
   try {
-    const tmdbRes = await axios.get(
-      `${TMDB_BASE_URL}${tmdbEndpoints[type].popular}`,
-      {
-        params: {
-          api_key: TMDB_API_KEY,
-          language: "en-US",
-          ...(type === "anime" ? { with_genres: 16 } : {}),
-        },
-      }
-    );
-    const tmdbMedia = tmdbRes.data.results;
+    const { page = 1 } = req.query;
 
-    const results = await Promise.all(
-      tmdbMedia.map(async (item) => {
-        const torrents = await TorrentService.searchMedia(
-          item.title || item.name,
-          type === "tv" ? "TV" : type === "anime" ? "Anime" : "Movies"
-        );
-        return {
-          tmdbId: item.id,
-          title: item.title || item.name,
-          overview: item.overview,
-          poster: item.poster_path,
-          backdrop: item.backdrop_path,
-          release_date: item.release_date || item.first_air_date,
-          type,
-          torrents,
-        };
-      })
-    );
-    res.json(results);
+    if (type === "anime") {
+      const data = await tmdbFetch("/tv/popular", { page });
+      const results = (data.results || []).filter((item) =>
+        item.genre_ids?.includes(16)
+      );
+      return res.json(results);
+    } else {
+      const endpoint = type === "movie" ? "/movie/popular" : "/tv/popular";
+      const data = await tmdbFetch(endpoint, { page });
+      return res.json(data.results || []);
+    }
   } catch (error) {
-    console.error(error);
+    console.error(`[${type}] Popular Error:`, error);
     res.status(500).json({ error: error.message });
   }
 };
 
+// Get Top Rated
 export const getTopRated = (type) => async (req, res) => {
   try {
-    const tmdbRes = await axios.get(
-      `${TMDB_BASE_URL}${tmdbEndpoints[type].top_rated}`,
-      {
-        params: {
-          api_key: TMDB_API_KEY,
-          language: "en-US",
-          ...(type === "anime" ? { with_genres: 16 } : {}),
-        },
-      }
-    );
-    const tmdbMedia = tmdbRes.data.results;
+    const { page = 1 } = req.query;
 
-    const results = await Promise.all(
-      tmdbMedia.map(async (item) => {
-        const torrents = await TorrentService.searchMedia(
-          item.title || item.name,
-          type === "tv" ? "TV" : type === "anime" ? "Anime" : "Movies"
-        );
-        return {
-          tmdbId: item.id,
-          title: item.title || item.name,
-          overview: item.overview,
-          poster: item.poster_path,
-          backdrop: item.backdrop_path,
-          release_date: item.release_date || item.first_air_date,
-          type,
-          torrents,
-        };
-      })
-    );
-    res.json(results);
+    if (type === "anime") {
+      const data = await tmdbFetch("/tv/top_rated", { page });
+      const results = (data.results || []).filter((item) =>
+        item.genre_ids?.includes(16)
+      );
+      return res.json(results);
+    } else {
+      const endpoint = type === "movie" ? "/movie/top_rated" : "/tv/top_rated";
+      const data = await tmdbFetch(endpoint, { page });
+      return res.json(data.results || []);
+    }
   } catch (error) {
-    console.error(error);
+    console.error(`[${type}] Top Rated Error:`, error);
     res.status(500).json({ error: error.message });
   }
 };
 
+// Get Upcoming
 export const getUpcoming = (type) => async (req, res) => {
   try {
-    const tmdbRes = await axios.get(
-      `${TMDB_BASE_URL}${tmdbEndpoints[type].upcoming}`,
-      {
-        params: { api_key: TMDB_API_KEY, language: "en-US" },
-      }
-    );
-    const tmdbMedia = tmdbRes.data.results;
+    const { page = 1 } = req.query;
 
-    const results = await Promise.all(
-      tmdbMedia.map(async (item) => {
-        const torrents = await TorrentService.searchMedia(
-          item.title || item.name,
-          type === "tv" ? "TV" : type === "anime" ? "Anime" : "Movies"
-        );
-        return {
-          tmdbId: item.id,
-          title: item.title || item.name,
-          overview: item.overview,
-          poster: item.poster_path,
-          backdrop: item.backdrop_path,
-          release_date: item.release_date || item.first_air_date,
-          type,
-          torrents,
-        };
-      })
-    );
-    res.json(results);
+    if (type === "anime") {
+      // Use "on the air" for anime
+      const data = await tmdbFetch("/tv/on_the_air", { page });
+      const results = (data.results || []).filter((item) =>
+        item.genre_ids?.includes(16)
+      );
+      return res.json(results);
+    } else {
+      const endpoint = type === "movie" ? "/movie/upcoming" : "/tv/on_the_air";
+      const data = await tmdbFetch(endpoint, { page });
+      return res.json(data.results || []);
+    }
   } catch (error) {
-    console.error(error);
+    console.error(`[${type}] Upcoming Error:`, error);
     res.status(500).json({ error: error.message });
   }
 };
 
-// Stream
+// Get By Genre
+export const getByGenre = (type) => async (req, res) => {
+  try {
+    const { genreId } = req.params;
+    const { page = 1 } = req.query;
+
+    if (type === "anime") {
+      // Combine animation genre (16) with requested genre
+      const data = await tmdbFetch("/discover/tv", {
+        with_genres: `16,${genreId}`,
+        page,
+      });
+      const results = (data.results || []).filter((item) =>
+        item.genre_ids?.includes(16)
+      );
+      return res.json(results);
+    } else {
+      const endpoint = type === "movie" ? "/discover/movie" : "/discover/tv";
+      const data = await tmdbFetch(endpoint, { with_genres: genreId, page });
+      return res.json(data.results || []);
+    }
+  } catch (error) {
+    console.error(`[${type}] Genre Error:`, error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Get Media Details
+export const getMediaDetails = (type) => async (req, res) => {
+  try {
+    const tmdbId = parseId(req.params.tmdbId);
+    if (!tmdbId) return res.status(400).json({ error: "Invalid TMDB ID" });
+
+    const endpoint = type === "movie" ? `/movie/${tmdbId}` : `/tv/${tmdbId}`;
+    const data = await tmdbFetch(endpoint);
+    return res.json(data || {});
+  } catch (error) {
+    console.error(`[${type}] Details Error:`, error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Stream (stub)
 export const stream = async (req, res) => {
   try {
     const { magnet } = req.query;
     if (!magnet)
       return res.status(400).json({ error: "Magnet link is required" });
-    const streamResult = await TorrentService.streamTorrent(magnet);
-    res.json(streamResult);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: error.message });
-  }
-};
 
-export const getByGenre = (type) => async (req, res) => {
-  try {
-    const { genreId } = req.params;
-    const tmdbRes = await axios.get(
-      `${TMDB_BASE_URL}/discover/${type === "movie" ? "movie" : "tv"}`,
-      {
-        params: {
-          api_key: TMDB_API_KEY,
-          language: "en-US",
-          with_genres: type === "anime" ? "16," + genreId : genreId,
-        },
-      }
-    );
-    const tmdbMedia = tmdbRes.data.results;
-    const results = await Promise.all(
-      tmdbMedia.map(async (item) => {
-        const torrents = await TorrentService.searchMedia(
-          item.title || item.name,
-          type === "tv" ? "TV" : type === "anime" ? "Anime" : "Movies"
-        );
-        return {
-          tmdbId: item.id,
-          title: item.title || item.name,
-          overview: item.overview,
-          poster: item.poster_path,
-          backdrop: item.backdrop_path,
-          release_date: item.release_date || item.first_air_date,
-          type,
-          torrents,
-        };
-      })
-    );
-    res.json(results);
+    // Placeholder, replace with your TorrentService
+    res.json({ message: "Streaming not implemented", magnet });
   } catch (error) {
-    console.error(error);
     res.status(500).json({ error: error.message });
   }
 };
